@@ -13,7 +13,8 @@ export const Route = createFileRoute("/student/sos")({
 });
 
 function Sos() {
-  const mine = useStore((s) => s.sos.filter((x) => x.patientId === STUDENT_ID));
+  const sos = useStore((s) => s.sos);
+  const mine = sos.filter((x) => x.patientId === STUDENT_ID);
   const pending = mine.find((x) => x.status === "pending");
   const [note, setNote] = useState("");
   return (

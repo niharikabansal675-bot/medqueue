@@ -1,0 +1,92 @@
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  STUDENT
+  STAFF
+}
+
+enum QueueStatus {
+  WAITING
+  IN_CONSULTATION
+  COMPLETED
+  CANCELLED
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum SosStatus {
+  PENDING
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      UserRole
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  queueTokens  QueueToken[]
+  appointments Appointment[]
+  sosAlerts    SosAlert[]
+}
+
+model QueueToken {
+  id           String      @id @default(cuid())
+  tokenNumber  Int
+  department   String
+  status       QueueStatus @default(WAITING)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id])
+
+  @@index([department, status])
+  @@index([studentId, status])
+}
+
+model Appointment {
+  id         String            @id @default(cuid())
+  department String
+  date       DateTime
+  status     AppointmentStatus @default(BOOKED)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id])
+
+  @@index([department, date, status])
+  @@index([studentId, date])
+}
+
+model SosAlert {
+  id        String    @id @default(cuid())
+  note      String?
+  status    SosStatus @default(PENDING)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  studentId String
+  student   User   @relation(fields: [studentId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([studentId, status])
+}

@@ -45,3 +45,16 @@ dist/
 
 # TypeScript build cache
 *.tsbuildinfo
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Backend generated and installed files
+backend/node_modules/
+backend/dist/
+# Prisma assistant skill files
+backend/.agents/
+backend/.claude/
+backend/.cursor/
+backend/.devin/
