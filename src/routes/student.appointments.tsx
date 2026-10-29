@@ -1,5 +1,5 @@
 
-import { useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { CalendarDays, CalendarPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -14,14 +14,8 @@ import {
   StatusBadge,
   inputCls,
 } from "@/components/med/ui";
-import {
-  type ApptErrors,
-  DEPARTMENTS,
-  STUDENT_ID,
-  bookAppointment,
-  setApptStatus,
-  useStore,
-} from "@/lib/store";
+import { DEPARTMENTS, type ApptErrors } from "@/lib/store";
+import { apiRequest } from "@/lib/api";
 
 export const Route = createFileRoute("/student/appointments")({
   head: () => ({
@@ -50,24 +44,35 @@ const TIME_SLOTS = Array.from({ length: 33 }, (_, i) => {
 }).filter((time) => time < "13:00" || time >= "14:00");
 
 function formatTime(time: string): string {
-  const parts = time.split(":");
-  const hours = Number(parts[0] ?? 0);
-  const minutes = Number(parts[1] ?? 0);
+  const [hourPart, minutePart] = time.split(":");
+  const hours = Number(hourPart ?? 0);
+  const minutes = Number(minutePart ?? 0);
   const period = hours >= 12 ? "PM" : "AM";
   const displayHour = hours % 12 || 12;
 
   return `${displayHour}:${String(minutes).padStart(2, "0")} ${period}`;
 }
 
+type AppointmentApi = {
+  id: string;
+  department: string;
+  date: string;
+  reason?: string | null;
+  status: string;
+  createdAt?: string;
+};
+
+type AppointmentResponse = {
+  success: boolean;
+  appointments?: AppointmentApi[];
+  data?: AppointmentApi[];
+};
+
 function Appts() {
-  const all = useStore((s) => s.appointments);
-
-  const mine = all
-    .filter((a) => a.patientId === STUDENT_ID)
-    .sort((a, b) =>
-      `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`),
-    );
-
+  const [appointments, setAppointments] = useState<AppointmentApi[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<ApptErrors>({});
   const [f, setF] = useState({
     department: "",
     date: "",
@@ -75,16 +80,79 @@ function Appts() {
     reason: "",
   });
 
-  const [errors, setErrors] = useState<ApptErrors>({});
+  const loadAppointments = useCallback(async () => {
+    try {
+      const result = await apiRequest<AppointmentResponse>(
+        "/appointments/my",
+      );
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
+      setAppointments(result.appointments ?? result.data ?? []);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not load appointments.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAppointments();
+  }, [loadAppointments]);
+
+  const mine = [...appointments].sort((a, b) =>
+    b.date.localeCompare(a.date),
+  );
+
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    const result = bookAppointment(f);
-    setErrors(result.errors);
+    const nextErrors: ApptErrors = {};
 
-    if (result.ok) {
-      toast.success("Appointment booked");
+    if (!f.department) nextErrors.department = "Select a department.";
+    if (!f.date) nextErrors.date = "Select a date.";
+    if (!f.time) nextErrors.time = "Select a time.";
+
+    if (f.date) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const selectedDate = new Date(`${f.date}T00:00:00`);
+      if (selectedDate < today) {
+        nextErrors.date = "Choose today or a future date.";
+      } else if (
+        selectedDate.getTime() === today.getTime() &&
+        f.time &&
+        new Date(`${f.date}T${f.time}:00`).getTime() <= Date.now()
+      ) {
+        nextErrors.time = "Choose a future time.";
+      }
+    }
+
+    setErrors(nextErrors);
+
+    if (Object.keys(nextErrors).length > 0) return;
+
+    setSubmitting(true);
+
+    try {
+      const appointmentDate = new Date(
+        `${f.date}T${f.time}:00`,
+      ).toISOString();
+
+      await apiRequest("/appointments", {
+        method: "POST",
+        body: {
+          department: f.department,
+          date: appointmentDate,
+          reason: f.reason.trim(),
+        },
+      });
+
+      toast.success("Appointment booked successfully.");
+
       setF({
         department: "",
         date: "",
@@ -92,6 +160,33 @@ function Appts() {
         reason: "",
       });
       setErrors({});
+
+      await loadAppointments();
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not book appointment.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cancelAppointment = async (id: string) => {
+    try {
+      await apiRequest(`/appointments/${id}/cancel`, {
+        method: "PATCH",
+      });
+
+      toast.success("Appointment cancelled.");
+      await loadAppointments();
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not cancel appointment.",
+      );
     }
   };
 
@@ -99,6 +194,14 @@ function Appts() {
     "aria-invalid": !!errors[key],
     "aria-describedby": errors[key] ? `${key}-err` : undefined,
   });
+
+  const statusForBadge = (status: string) => {
+    const normalized = status.toLowerCase();
+
+    if (normalized === "booked") return "confirmed";
+
+    return normalized;
+  };
 
   return (
     <>
@@ -208,15 +311,20 @@ function Appts() {
               type="submit"
               variant="default"
               className="h-10 w-full"
+              disabled={submitting}
             >
               <CalendarPlus />
-              Book appointment
+              {submitting ? "Booking..." : "Book appointment"}
             </Button>
           </form>
         </Panel>
 
         <Panel title="My appointments">
-          {mine.length ? (
+          {loading ? (
+            <p className="text-sm text-muted-foreground">
+              Loading appointments...
+            </p>
+          ) : mine.length > 0 ? (
             <DataTable
               rows={mine}
               rowKey={(a) => a.id}
@@ -224,14 +332,24 @@ function Appts() {
                 {
                   h: "Date",
                   cell: (a) =>
-                    new Date(`${a.date}T00:00`).toLocaleDateString(
-                      [],
-                      { dateStyle: "medium" },
-                    ),
+                    new Date(a.date).toLocaleDateString([], {
+                      dateStyle: "medium",
+                    }),
                 },
                 {
                   h: "Time",
-                  cell: (a) => formatTime(a.time),
+                  cell: (a) => {
+                    const time = new Date(a.date).toLocaleTimeString(
+                      "en-GB",
+                      {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      },
+                    );
+
+                    return formatTime(time);
+                  },
                 },
                 {
                   h: "Department",
@@ -239,21 +357,26 @@ function Appts() {
                 },
                 {
                   h: "Status",
-                  cell: (a) => <StatusBadge status={a.status} />,
+                  cell: (a) => (
+                    <StatusBadge status={statusForBadge(a.status)} />
+                  ),
                 },
                 {
                   h: "Action",
                   cell: (a) =>
-                    a.status === "booked" ||
-                    a.status === "confirmed" ? (
+                    ["booked", "confirmed", "scheduled"].includes(
+                      a.status.toLowerCase(),
+                    ) ? (
                       <Confirm
                         title="Cancel this appointment?"
-                        description={`${a.department} on ${a.date} at ${formatTime(a.time)} will be cancelled.`}
+                        description={`${a.department} on ${new Date(
+                          a.date,
+                        ).toLocaleString([], {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })} will be cancelled.`}
                         confirmLabel="Cancel appointment"
-                        onConfirm={() => {
-                          setApptStatus(a.id, "cancelled");
-                          toast.success("Appointment cancelled");
-                        }}
+                        onConfirm={() => void cancelAppointment(a.id)}
                         trigger={
                           <Button size="sm" variant="outline">
                             Cancel

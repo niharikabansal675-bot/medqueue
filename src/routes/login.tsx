@@ -13,6 +13,7 @@ import {
   HeartPulse,
   Stethoscope,
 } from "lucide-react";
+import { apiRequest, saveAuthToken } from "@/lib/api";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -20,15 +21,27 @@ export const Route = createFileRoute("/login")({
   }),
   head: () => ({
     meta: [
-      { title: "Demo Login — MedQueue" },
+      { title: "Login — MedQueue" },
       {
         name: "description",
-        content: "Sign in to the MedQueue demonstration.",
+        content: "Sign in to MedQueue.",
       },
     ],
   }),
   component: Login,
 });
+
+type LoginResponse = {
+  success: boolean;
+  message: string;
+  token: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    role: "STUDENT" | "STAFF";
+  };
+};
 
 function Login() {
   const { role } = Route.useSearch();
@@ -38,30 +51,65 @@ function Login() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const isStaff = role === "staff";
 
-  const demoId = isStaff
-    ? "staff@medqueue.demo"
-    : "student@medqueue.demo";
-
-  const demoPassword = isStaff ? "Staff123!" : "Student123!";
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
 
-    if (
-      userId.trim().toLowerCase() !== demoId ||
-      password !== demoPassword
-    ) {
-      setError("Invalid demo ID or password. Use the demo credentials below.");
-      return;
-    }
+    if (loading) return;
 
-    void navigate({
-      to: isStaff ? "/staff" : "/student",
-    });
+    setLoading(true);
+
+    try {
+      const result = await apiRequest<LoginResponse>("/auth/login", {
+        method: "POST",
+        authenticated: false,
+        body: {
+          email: userId.trim(),
+          password,
+        },
+      });
+
+      if (!result.success || !result.token || !result.user) {
+        throw new Error("The server returned an invalid login response.");
+      }
+
+      if (
+        (isStaff && result.user.role !== "STAFF") ||
+        (!isStaff && result.user.role !== "STUDENT")
+      ) {
+        throw new Error(
+          `This account is not registered as a ${isStaff ? "staff" : "student"} account.`,
+        );
+      }
+
+      saveAuthToken(result.token);
+
+      localStorage.setItem(
+        "medqueue:auth-user",
+        JSON.stringify({
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          role: result.user.role,
+        }),
+      );
+
+      await navigate({
+        to: isStaff ? "/staff" : "/student",
+      });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to sign in. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -93,7 +141,7 @@ function Login() {
             </div>
 
             <p className="mb-2 text-sm font-semibold uppercase tracking-wider text-teal">
-              MedQueue demo
+              MedQueue
             </p>
 
             <h1 className="text-3xl font-bold tracking-tight text-foreground">
@@ -111,16 +159,16 @@ function Login() {
                   htmlFor="userId"
                   className="mb-2 block text-sm font-medium text-foreground"
                 >
-                  Email or demo ID
+                  Email
                 </label>
                 <input
                   id="userId"
-                  type="text"
+                  type="email"
                   autoComplete="username"
                   required
                   value={userId}
                   onChange={(event) => setUserId(event.target.value)}
-                  placeholder="Enter your demo ID"
+                  placeholder="Enter your email"
                   className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-teal focus:ring-2 focus:ring-teal/20"
                 />
               </div>
@@ -171,46 +219,23 @@ function Login() {
 
               <button
                 type="submit"
-                className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-2"
+                disabled={loading}
+                className="w-full rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-teal focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Sign in to MedQueue
+                {loading ? "Signing in..." : "Sign in to MedQueue"}
               </button>
             </form>
 
-            <div className="mt-6 rounded-xl border border-border bg-secondary/50 p-4">
-              <p className="text-sm font-semibold text-foreground">
-                Demo credentials
-              </p>
-
-              <p className="mt-2 text-xs text-muted-foreground">
-                {isStaff ? "Staff account" : "Student account"}
-              </p>
-
-              <p className="mt-1 break-all text-sm text-foreground">
-                {demoId}
-              </p>
-
-              <p className="mt-1 text-sm text-foreground">
-                Password: {demoPassword}
-              </p>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setUserId(demoId);
-                  setPassword(demoPassword);
-                  setError("");
-                }}
-                className="mt-3 text-sm font-semibold text-teal underline underline-offset-4 hover:opacity-80"
+            <div className="mt-5 text-center text-sm text-muted-foreground">
+              Don't have an account?{" "}
+              <Link
+                to="/register"
+                className="font-semibold text-teal underline underline-offset-4 hover:opacity-80"
               >
-                Fill demo credentials
-              </button>
+                Create Account
+              </Link>
             </div>
 
-            <p className="mt-5 text-center text-xs text-muted-foreground">
-              Demo mode only. Do not enter real passwords or sensitive
-              information.
-            </p>
           </div>
         </section>
       </main>

@@ -48,19 +48,20 @@ model User {
 }
 
 model QueueToken {
-  id           String      @id @default(cuid())
-  tokenNumber  Int
-  department   String
-  status       QueueStatus @default(WAITING)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id          String      @id @default(cuid())
+  tokenNumber Int
+  department  String
+  status      QueueStatus @default(WAITING)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   studentId String
-  student   User   @relation(fields: [studentId], references: [id])
+  student   User @relation(fields: [studentId], references: [id])
 
   @@index([department, status])
   @@index([studentId, status])
 }
+
 
 model Appointment {
   id         String            @id @default(cuid())
